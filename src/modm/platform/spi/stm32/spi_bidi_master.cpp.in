@@ -16,6 +16,7 @@
 // ----------------------------------------------------------------------------
 
 #include "spi_bidi_master_{{id}}.hpp"
+#include <modm/architecture/interface/atomic_lock.hpp>
 
 // Bit0: single write transfer state
 // Bit1: single read transfer state
@@ -106,7 +107,7 @@ modm::platform::SpiBidiMaster{{ id }}::write(uint8_t data)
 	}
 
 	// stop SPI transaction
-	SpiHal{{ id }}::setSpiTransactionEnabled(false);
+	//SpiHal{{ id }}::setSpiTransactionEnabled(false);
 
 	// transfer finished
 	state &= ~Bit0;
@@ -116,40 +117,30 @@ modm::platform::SpiBidiMaster{{ id }}::write(uint8_t data)
 modm::ResumableResult<uint8_t>
 modm::platform::SpiBidiMaster{{ id }}::read()
 {
-	// this is a manually implemented "fast resumable function"
-	// there is no context or nesting protection, since we don't need it.
-	// there are only two states encoded into 1 bit (LSB of state):
-	//   1. waiting to start, and
-	//   2. waiting to finish.
+	uint8_t dummy = 0;
+	while (SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
+		SpiHal{{ id }}::read(dummy);
+	}
 
-	// LSB != Bit1 ?
-	if ( !(state & Bit1) )
+	// set read mode
+	SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
+
+
+	const auto cr1Output = SPI{{ id }}->CR1 | SPI_CR1_BIDIOE;
+	// start transfer
+	modm::atomic::Lock lock;
 	{
-		uint8_t dummy = 0;
-		while (SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
-			SpiHal{{ id }}::read(dummy);
-		}
+	SpiHal{{ id }}::setSpiTransactionEnabled(true);
 
-		// set read mode
-		SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
-
-		// start transfer
-		SpiHal{{ id }}::setSpiTransactionEnabled(true);
-
-		// set LSB = Bit0
-		state |= Bit1;
+	//while(!SpiHal{{ id }}::isReceiveRegisterNotEmpty());
+	while(!(SPI{{ id }}->SR & SPI_SR_RXNE));
+	SPI{{ id }}->CR1 = cr1Output;
+	//SpiHal{{ id }}::setSpiTransactionEnabled(false);
 	}
-
-	if (!SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
-		return {modm::rf::Running};
-	}
-
 	uint8_t data = 0;
 	SpiHal{{ id }}::read(data);
-	SpiHal{{ id }}::setSpiTransactionEnabled(false);
+	//SpiHal{{ id }}::setSpiTransactionEnabled(false);
 
-	// transfer finished
-	state &= ~Bit1;
 	return {modm::rf::Stop, data};
 }
 
@@ -186,33 +177,13 @@ modm::platform::SpiBidiMaster{{ id }}::writeMultiByte(uint8_t data)
 	return {modm::rf::Stop};
 }
 
-modm::ResumableResult<uint8_t>
+/*uint8_t
 modm::platform::SpiBidiMaster{{ id }}::readMultiByte()
 {
-	// this is a manually implemented "fast resumable function"
-	// there is no context or nesting protection, since we don't need it.
-	// there are only two states encoded into 1 bit (LSB of state):
-	//   1. waiting to start, and
-	//   2. waiting to finish.
 
-	// LSB != Bit1 ?
-	if ( !(state & Bit1) ) {
-		// set LSB = Bit0
-		state |= Bit1;
-	}
-
-	if (!SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
-		return {modm::rf::Running};
-	}
-
-	uint8_t data = 0;
-	SpiHal{{ id }}::read(data);
-
-	// transfer finished
-	state &= ~Bit1;
-	return {modm::rf::Stop, data};
+	return data;
 }
-
+*/
 
 modm::ResumableResult<void>
 modm::platform::SpiBidiMaster{{ id }}::write(const uint8_t* tx, std::size_t length)
@@ -259,7 +230,7 @@ modm::platform::SpiBidiMaster{{ id }}::write(const uint8_t* tx, std::size_t leng
 			if (SpiHal{{ id }}::isBusy())
 				return {modm::rf::Running};
 
-			SpiHal{{ id }}::setSpiTransactionEnabled(false);
+			//SpiHal{{ id }}::setSpiTransactionEnabled(false);
 			//SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
 
 			// clear the state
@@ -271,58 +242,41 @@ modm::platform::SpiBidiMaster{{ id }}::write(const uint8_t* tx, std::size_t leng
 modm::ResumableResult<void>
 modm::platform::SpiBidiMaster{{ id }}::read(uint8_t* rx, std::size_t length)
 {
-	// this is a manually implemented "fast resumable function"
-	// there is no context or nesting protection, since we don't need it.
-	// there are only two states encoded into 1 bit (Bit1 of state):
-	//   1. initialize index, and
-	//   2. wait for 1-byte transfer to finish.
-
-	// we need to globally remember which byte we are currently transferring
-	static std::size_t index = 0;
-
-	uint8_t dummy = 0;
-
-	// we are only interested in Bit3
-	switch(state & Bit3)
-	{
-		case 0:
-			// we will only visit this state once
-			while (SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
-				SpiHal{{ id }}::read(dummy);
-			}
-
-			// set read mode
-			SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
-
-			// start transfer
-			SpiHal{{ id }}::setSpiTransactionEnabled(true);
-
-			state |= Bit3;
-
-			// initialize index and check range
-			index = 0;
-			while (index < length)
-			{
-		default:
-		{
-				// call the resumable function
-				modm::ResumableResult<uint8_t> result = readMultiByte();
-
-				// if the resumable function is still running, so are we
-				if (result.getState() > modm::rf::NestingError)
-					return {modm::rf::Running};
-
-				// if rx != 0, we copy the result into the array
-				if (rx) rx[index] = result.getResult();
-		}
-				index++;
-			}
-
-			// stop transfer
-			SpiHal{{ id }}::setSpiTransactionEnabled(false);
-
-			// clear the state
-			state &= ~Bit3;
-			return {modm::rf::Stop};
+	if(length == 0) {
+		return {modm::rf::Stop};
 	}
+
+	while (SpiHal{{ id }}::isReceiveRegisterNotEmpty()) {
+		uint8_t dummy = 0;
+		SpiHal{{ id }}::read(dummy);
+	}
+
+	// set read mode
+	SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
+
+	// start transfer
+	SpiHal{{ id }}::setSpiTransactionEnabled(true);
+	for (size_t index = 0; index < (length - 1); ++index) {
+		while(!SpiHal{{ id }}::isReceiveRegisterNotEmpty());
+
+		uint8_t data = 0;
+		SpiHal{{ id }}::read(data);
+		if (rx) {
+			rx[index] = data;
+		}
+		index++;
+	}
+	while(!SpiHal{{ id }}::isReceiveRegisterNotEmpty());
+	uint8_t data = 0;
+
+	// stop transfer
+	//SpiHal{{ id }}::setSpiTransactionEnabled(false);
+	SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Output);
+
+	SpiHal{{ id }}::read(data);
+
+	if (rx) {
+		rx[length - 1] = data;
+	}
+	return {modm::rf::Stop};
 }

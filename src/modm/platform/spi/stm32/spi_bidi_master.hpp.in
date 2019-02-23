@@ -122,6 +122,8 @@ public:
 
 		// set half duplex mode
 		SpiHal{{ id }}::setDuplexMode(SpiHal{{ id }}::DuplexMode::HalfDuplex);
+		SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Output);	
+		SpiHal{{ id }}::setSpiTransactionEnabled(true);
 		state = 0;
 	}
 
@@ -181,12 +183,12 @@ public:
 	static modm::ResumableResult<void>
 	read(uint8_t* rx, std::size_t length);
 
-//private:
+private:
 	static modm::ResumableResult<void>
 	writeMultiByte(uint8_t data);
 
-	static modm::ResumableResult<uint8_t>
- 	readMultiByte();
+	//static uint8_t
+ 	//readMultiByte();
 
 	// end documentation inherited
 };
