@@ -187,9 +187,6 @@ private:
 	static modm::ResumableResult<void>
 	writeMultiByte(uint8_t data);
 
-	//static uint8_t
- 	//readMultiByte();
-
 	// end documentation inherited
 };
 
