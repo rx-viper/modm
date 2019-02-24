@@ -116,13 +116,11 @@ modm::platform::SpiBidiMaster{{ id }}::read()
 		SpiHal{{ id }}::read(dummy);
 	}
 
-	// set read mode
+	// set read mode and start transfer
+	modm::atomic::Lock lock;
 	SpiHal{{ id }}::setDataDirection(SpiHal{{ id }}::DataDirection::Input);
 
-
 	const auto cr1Output = SPI{{ id }}->CR1 | SPI_CR1_BIDIOE;
-	// start transfer
-	modm::atomic::Lock lock;
 
 	while(!(SPI{{ id }}->SR & SPI_SR_RXNE));
 	SPI{{ id }}->CR1 = cr1Output;
